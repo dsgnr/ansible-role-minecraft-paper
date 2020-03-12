@@ -1,0 +1,14 @@
+---
+# defaults file for deploy-minecraft-server
+minecraft_server: minecraft
+minecraft_service: "{{ minecraft_server }}"
+minecraft_user: minecraft
+minecraft_group: minecraft
+minecraft_home: /srv/minecraft
+minecraft_server_properties: {}
+minecraft_max_memory: 1024M
+minecraft_initial_memory: 1024M
+minecraft_console_fifo_mode: '0666'
+minecraft_console_fifo: /run/{{ minecraft_server }}/console
+vanilla_mc: false
+minecraft_jar: "{% if vanilla_mc %}{{ minecraft_server }}.jar{% else %}paperclip.jar{% endif %}"

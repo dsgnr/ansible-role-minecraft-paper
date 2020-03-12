@@ -1,0 +1,115 @@
+---
+
+- name: Get the latest MC version
+  uri:
+    url: https://launchermeta.mojang.com/mc/game/version_manifest.json
+    return_content: yes
+  register: version_list
+  when: vanilla_mc
+
+- name: Set version facts
+  set_fact:
+    versioning: "{{ version_list.json.versions[0] }}"
+    release_id: "{{ version_list.json.versions[0].id }}"
+    release_url: "{{ version_list.json.versions[0].url }}"
+  when: vanilla_mc
+
+- name: Find the latest release path
+  uri:
+    url: "{{ release_url }}"
+    return_content: yes
+  register: release
+  when: vanilla_mc
+
+- name: Check version IDs match
+  assert:
+    that:
+      - release_id == release.json.id
+  when: vanilla_mc
+
+- name: Download the latest version of minecraft server
+  get_url:
+    url: "{{ release.json.downloads.server.url }}"
+    dest: "{{ minecraft_home }}/minecraft_server_{{ release_id }}.jar"
+    checksum: sha1:"{{ release.json.downloads.server.sha1 }}"
+  when: vanilla_mc
+
+- name: symlink Minecraft server
+  file:
+    src: "{{ minecraft_home }}/minecraft_server_{{ release_id }}.jar"
+    path: "{{ minecraft_home }}/{{ minecraft_jar }}"
+    owner: "{{ minecraft_user }}"
+    group: "{{ minecraft_group }}"
+    state: link
+  when: vanilla_mc
+  notify:
+    - restart_minecraft
+
+- name: Get paper versions
+  uri:
+    url: https://papermc.io/api/v1/paper
+  register: paper_version
+  when: not vanilla_mc
+
+- name: Set paper version
+  set_fact:
+    paper_latest_version: "{{ paper_version.json['versions'][0] }}"
+  when: not vanilla_mc
+
+- name: Get latest paper build
+  uri:
+    url: "https://papermc.io/api/v1/paper/{{ paper_latest_version }}"
+  register: paper_latest_build
+  when: not vanilla_mc
+
+- name: Set latest paper build
+  set_fact:
+    latest_paper_build: "{{ paper_latest_build.json['builds']['latest'] }}"
+  when: not vanilla_mc
+
+- name: Download paper
+  get_url:
+    url: "https://papermc.io/api/v1/paper/{{ paper_latest_version }}/{{ latest_paper_build }}/download"
+    dest: "{{ minecraft_home }}/paperclip.jar"
+  when: not vanilla_mc
+
+- name: install units
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item | replace('minecraft', minecraft_service) }}"
+    owner: root
+    group: root
+    mode: '0644'
+  with_items:
+    - minecraft.service
+    - minecraft.socket
+  register: systemd_service_config
+  notify: reload_systemd
+
+- name: agree to EULA
+  copy:
+    src: eula.txt
+    dest: "{{ minecraft_home }}/eula.txt"
+    mode: '0644'
+    owner: "{{ minecraft_user }}"
+    group: "{{ minecraft_group }}"
+
+- name: generate server.properties
+  shell: |
+    set -o pipefail
+    echo "stop" | java -jar {{ minecraft_jar }} nogui
+  args:
+    creates: server.properties
+    chdir: "{{ minecraft_home }}"
+  become: yes
+  become_user: "{{ minecraft_user }}"
+  notify:
+    - enable_minecraft
+
+- name: Enable firewall rules
+  firewalld:
+    port: 25565/tcp
+    permanent: yes
+    state: enabled
+    immediate: yes
+
